@@ -19,6 +19,15 @@ const pauseByMood: Record<NarrationMood, number> = {
   reflective: 360,
 };
 
+const minimumPauseByMood: Record<NarrationMood, number> = {
+  address: 360,
+  title: 620,
+  narrative: 360,
+  urgent: 260,
+  ominous: 680,
+  reflective: 520,
+};
+
 class EmberNarrator {
   private audio: HTMLAudioElement | null = null;
   private pendingTimer: number | null = null;
@@ -86,9 +95,14 @@ class EmberNarrator {
       if (continued || generation !== this.generation) return;
       continued = true;
       this.audio = null;
+      const holdMs = Math.max(
+        segment.pauseAfter ?? pauseByMood[segment.mood],
+        minimumPauseByMood[segment.mood],
+        Math.max(240, Math.min(900, segment.text.length * 14)),
+      );
       this.pendingTimer = window.setTimeout(
         () => this.playSegment(segments, index + 1, generation, started, onEnd, onStart),
-        segment.pauseAfter ?? pauseByMood[segment.mood],
+        holdMs,
       );
     };
     audio.onended = continueScript;

@@ -19,13 +19,13 @@ export function DiceCheckOverlay({ choice, result, success, locale, onFinish }: 
   const copy = uiCopy[locale];
 
   useEffect(() => {
-    const ticker = window.setInterval(() => setFace(Math.floor(Math.random() * 20) + 1), 70);
+    const ticker = window.setInterval(() => setFace(Math.floor(Math.random() * 20) + 1), 90);
     const reveal = window.setTimeout(() => {
       window.clearInterval(ticker);
       setFace(result.chosen);
       setPhase('resolved');
       emberAudio.play(result.natural20 ? 'crit' : result.natural1 ? 'defeat' : 'dice');
-    }, 1050);
+    }, 1420);
     return () => {
       window.clearInterval(ticker);
       window.clearTimeout(reveal);

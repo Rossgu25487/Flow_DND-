@@ -60,12 +60,33 @@ function storyMood(nodeId: string, sentence: string): NarrationMood {
   return 'narrative';
 }
 
+const PAUSE_BY_MOOD: Record<NarrationMood, number> = {
+  address: 320,
+  title: 520,
+  narrative: 360,
+  urgent: 240,
+  ominous: 560,
+  reflective: 460,
+};
+
+function estimateNarrationPause(text: string, mood: NarrationMood): number {
+  const readingMs = Math.max(260, Math.min(900, text.length * 18));
+  return Math.max(PAUSE_BY_MOOD[mood], readingMs);
+}
+
 function storyCues(sentence: string): NonNullable<NarrationSegment['cues']> {
   if (/dragon/i.test(sentence)) return ['dragon', 'fire'];
+  if (/warden|beacon|ash-warden/i.test(sentence)) return ['dragon', 'fire', 'ritual'];
   if (/fire|flame|burn/i.test(sentence)) return ['fire'];
   if (/ritual|warden/i.test(sentence)) return ['ritual'];
   if (/black tide|shake|mountain/i.test(sentence)) return ['rumble'];
   if (/wind|dawn|road/i.test(sentence)) return ['wind'];
+  return [];
+}
+
+function nodeCues(nodeId: string): NonNullable<NarrationSegment['cues']> {
+  if (nodeId === 'boss-intro' || nodeId === 'boss-battle' || nodeId === 'final-choice') return ['dragon', 'rumble', 'fire'];
+  if (nodeId === 'briefing') return ['wind'];
   return [];
 }
 
@@ -107,14 +128,26 @@ export function App() {
       mood: storyMood(currentNode.id, sentence),
       cues: withFreshCues(sentence),
     }));
+    const nodeSpecificCues = nodeCues(currentNode.id);
     const segments: NarrationSegment[] = [
       ...(currentNode.id === contract.startNodeId ? [{ text: 'Contract-bearer. Your company has been summoned.', mood: 'address' as const }] : []),
       { text: currentNode.title['en-US'], mood: 'title' as const },
-      ...body,
-      ...(currentNode.quote ? [{ text: currentNode.quote['en-US'], mood: 'ominous' as const, pauseAfter: 520, cues: withFreshCues(currentNode.quote['en-US']) }] : []),
+      ...body.map((sentence, index) => {
+        const mood = storyMood(currentNode.id, sentence);
+        const derivedCues = withFreshCues(sentence);
+        const mergedCues = index === 0 ? [...derivedCues, ...nodeSpecificCues.filter((cue) => !derivedCues.includes(cue))].slice(0, 2) : derivedCues;
+        return {
+          text: sentence,
+          mood,
+          cues: mergedCues,
+          pauseAfter: estimateNarrationPause(sentence, mood),
+        };
+      }),
+      ...(currentNode.quote ? [{ text: currentNode.quote['en-US'], mood: 'ominous' as const, pauseAfter: 680, cues: withFreshCues(currentNode.quote['en-US']) }] : []),
     ];
     return segments.map((segment, index) => ({
       ...segment,
+      pauseAfter: index === segments.length - 1 ? 420 : segment.pauseAfter,
       audioUrl: `/voice/en/${currentNode.id}-${String(index).padStart(2, '0')}.wav`,
     }));
   }, [currentNode]);
