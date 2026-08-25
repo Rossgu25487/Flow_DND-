@@ -15,6 +15,8 @@ export type SoundCue =
   | 'victory'
   | 'defeat';
 
+export type NarrativeSoundCue = 'fire' | 'rumble' | 'wind' | 'ritual' | 'dragon';
+
 class EmberAudioEngine {
   private context: AudioContext | null = null;
   private master: GainNode | null = null;
@@ -24,7 +26,9 @@ class EmberAudioEngine {
   private desiredMusic: 'menu' | 'battle' | null = null;
   private currentMusic: HTMLAudioElement | null = null;
   private musicFade: number | null = null;
+  private mixFade: number | null = null;
   private musicDuck = 1;
+  private musicVolume = 0.65;
   private readonly music = new Map<'menu' | 'battle', HTMLAudioElement>();
 
   setEnabled(enabled: boolean): void {
@@ -111,6 +115,38 @@ class EmberAudioEngine {
     });
   }
 
+  playNarrativeCue(cue: NarrativeSoundCue): void {
+    if (!this.enabled) return;
+    void this.unlock().then(() => {
+      if (!this.context || !this.master) return;
+      if (cue === 'fire') {
+        this.noise(1.25, 920, 0.035, 420);
+        this.tone(58, 42, 1.35, 0.025, 'sine');
+        for (let index = 0; index < 7; index += 1) {
+          window.setTimeout(() => this.noise(0.045, 1400 + index * 170, 0.025, 620), 90 + index * 145);
+        }
+      }
+      if (cue === 'rumble') {
+        this.tone(62, 31, 1.7, 0.065, 'sine');
+        this.noise(1.5, 230, 0.035, 80);
+      }
+      if (cue === 'wind') {
+        this.noise(1.8, 720, 0.035, 310);
+        this.tone(145, 105, 1.5, 0.012, 'sine');
+      }
+      if (cue === 'ritual') {
+        this.tone(92, 138, 1.65, 0.038, 'sine');
+        this.tone(139, 77, 1.45, 0.026, 'triangle', 0.08);
+        this.noise(1.1, 520, 0.022, 190);
+      }
+      if (cue === 'dragon') {
+        this.tone(74, 36, 1.65, 0.085, 'sawtooth');
+        this.tone(111, 49, 1.4, 0.045, 'square', 0.04);
+        this.noise(1.55, 280, 0.075, 72);
+      }
+    });
+  }
+
   playMusic(mode: 'menu' | 'battle'): void {
     this.desiredMusic = mode;
     if (!this.enabled || typeof window === 'undefined') return;
@@ -129,11 +165,11 @@ class EmberAudioEngine {
       // The next user gesture will retry playback.
     });
     if (this.musicFade !== null) window.clearInterval(this.musicFade);
-    const target = (mode === 'battle' ? 0.28 : 0.34) * this.musicDuck;
     let step = 0;
     this.musicFade = window.setInterval(() => {
       step += 1;
       const progress = Math.min(1, step / 18);
+      const target = this.musicTarget(mode);
       next!.volume = target * progress;
       if (previous && previous !== next) previous.volume = Math.max(0, target * (1 - progress));
       if (progress >= 1) {
@@ -145,10 +181,15 @@ class EmberAudioEngine {
   }
 
   duckMusic(ducked: boolean): void {
-    this.musicDuck = ducked ? 0.48 : 1;
+    this.musicDuck = ducked ? 0.2 : 1;
     const currentMode = this.currentMusic === this.music.get('battle') ? 'battle' : 'menu';
-    const target = (currentMode === 'battle' ? 0.28 : 0.34) * this.musicDuck;
-    if (this.currentMusic) this.currentMusic.volume = target;
+    this.rampCurrentMusic(this.musicTarget(currentMode), ducked ? 160 : 360);
+  }
+
+  setMusicVolume(volume: number): void {
+    this.musicVolume = Math.min(1, Math.max(0, volume));
+    const currentMode = this.currentMusic === this.music.get('battle') ? 'battle' : 'menu';
+    this.rampCurrentMusic(this.musicTarget(currentMode), 140);
   }
 
   startAmbience(): void {
@@ -229,6 +270,30 @@ class EmberAudioEngine {
     oscillator.connect(gain).connect(this.master);
     oscillator.start(start);
     oscillator.stop(start + duration + 0.02);
+  }
+
+  private musicTarget(mode: 'menu' | 'battle'): number {
+    const base = mode === 'battle' ? 0.16 : 0.18;
+    return base * this.musicVolume * this.musicDuck;
+  }
+
+  private rampCurrentMusic(target: number, duration: number): void {
+    if (!this.currentMusic || typeof window === 'undefined') return;
+    if (this.musicFade !== null) return;
+    if (this.mixFade !== null) window.clearInterval(this.mixFade);
+    const track = this.currentMusic;
+    const start = track.volume;
+    const steps = Math.max(1, Math.round(duration / 20));
+    let step = 0;
+    this.mixFade = window.setInterval(() => {
+      step += 1;
+      const progress = Math.min(1, step / steps);
+      track.volume = start + (target - start) * progress;
+      if (progress >= 1) {
+        if (this.mixFade !== null) window.clearInterval(this.mixFade);
+        this.mixFade = null;
+      }
+    }, 20);
   }
 
   private noise(duration: number, frequency: number, volume: number, endFrequency = frequency): void {

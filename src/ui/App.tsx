@@ -5,7 +5,7 @@ import keyArtUrl from '../assets/key-art.png';
 import { ashenBeaconPack } from '../content/ashenBeacon';
 import { fixturePack } from '../content/fixturePack';
 import { emberAudio } from '../game/audio';
-import { emberNarrator } from '../game/narrator';
+import { emberNarrator, type NarrationMood, type NarrationSegment } from '../game/narrator';
 import { validateContentPack } from '../game/contentValidator';
 import { localize, uiCopy } from '../game/i18n';
 import { defaultProfile, loadProfile, saveProfile, setProfileLocale, track } from '../game/profile';
@@ -49,6 +49,26 @@ function localeToggle(profile: PlayerProfile): Locale {
   return profile.locale === 'zh-CN' ? 'en-US' : 'zh-CN';
 }
 
+function splitNarration(text: string): string[] {
+  return text.match(/[^.!?]+[.!?]+|[^.!?]+$/g)?.map((sentence) => sentence.trim()).filter(Boolean) ?? [text];
+}
+
+function storyMood(nodeId: string, sentence: string): NarrationMood {
+  if (nodeId.includes('ending')) return 'reflective';
+  if (nodeId === 'boss-intro' || /warden|black flame|ritual|death/i.test(sentence)) return 'ominous';
+  if (/must|now|quickens|shake|warning|attack/i.test(sentence)) return 'urgent';
+  return 'narrative';
+}
+
+function storyCues(sentence: string): NonNullable<NarrationSegment['cues']> {
+  if (/dragon/i.test(sentence)) return ['dragon', 'fire'];
+  if (/fire|flame|burn/i.test(sentence)) return ['fire'];
+  if (/ritual|warden/i.test(sentence)) return ['ritual'];
+  if (/black tide|shake|mountain/i.test(sentence)) return ['rumble'];
+  if (/wind|dawn|road/i.test(sentence)) return ['wind'];
+  return [];
+}
+
 export function App() {
   const [profile, setProfile] = useState<PlayerProfile>(() => {
     if (typeof localStorage === 'undefined') return defaultProfile;
@@ -74,20 +94,38 @@ export function App() {
   const validation = useMemo(() => [validateContentPack(pack), validateContentPack(fixturePack)], []);
   const validationErrors = validation.flatMap((result) => result.errors);
   const currentNode = contract.story.find((node) => node.id === nodeId);
-  const narrationText = currentNode && currentNode.type !== 'battle'
-    ? [
-        currentNode.id === contract.startNodeId && profile.playerName
-          ? (locale === 'zh-CN' ? `契约者${profile.playerName}。` : `Contract-bearer ${profile.playerName}.`)
-          : '',
-        localize(currentNode.title, locale),
-        localize(currentNode.text, locale),
-        currentNode.quote ? localize(currentNode.quote, locale) : '',
-      ].filter(Boolean).join(locale === 'zh-CN' ? '。' : '. ')
-    : '';
+  const narrationScript = useMemo<NarrationSegment[]>(() => {
+    if (!currentNode || currentNode.type === 'battle') return [];
+    const usedCues = new Set<string>();
+    const withFreshCues = (sentence: string) => storyCues(sentence).filter((cue) => {
+      if (usedCues.has(cue)) return false;
+      usedCues.add(cue);
+      return true;
+    });
+    const body = splitNarration(currentNode.text['en-US']).map((sentence) => ({
+      text: sentence,
+      mood: storyMood(currentNode.id, sentence),
+      cues: withFreshCues(sentence),
+    }));
+    return [
+      ...(currentNode.id === contract.startNodeId ? [{ text: 'Contract-bearer. Your company has been summoned.', mood: 'address' as const }] : []),
+      { text: currentNode.title['en-US'], mood: 'title' as const },
+      ...body,
+      ...(currentNode.quote ? [{ text: currentNode.quote['en-US'], mood: 'ominous' as const, pauseAfter: 520, cues: withFreshCues(currentNode.quote['en-US']) }] : []),
+    ];
+  }, [currentNode]);
 
   useEffect(() => {
     emberAudio.setEnabled(profile.soundEnabled);
   }, [profile.soundEnabled]);
+
+  useEffect(() => {
+    emberAudio.setMusicVolume(profile.musicVolume);
+  }, [profile.musicVolume]);
+
+  useEffect(() => {
+    emberNarrator.setVolume(profile.narrationVolume);
+  }, [profile.narrationVolume]);
 
   useEffect(() => {
     if (!profile.soundEnabled) return;
@@ -98,17 +136,17 @@ export function App() {
   useEffect(() => {
     emberNarrator.stop();
     setNarrating(false);
-    if (!inRun || !narrationText || !profile.narrationEnabled || !profile.soundEnabled) return;
+    if (!inRun || !narrationScript.length || !profile.narrationEnabled || !profile.soundEnabled) return;
     const timer = window.setTimeout(() => {
       setNarrating(true);
-      const started = emberNarrator.speak(narrationText, locale, () => setNarrating(false));
+      const started = emberNarrator.speak(narrationScript, () => setNarrating(false));
       if (!started) setNarrating(false);
     }, 420);
     return () => {
       window.clearTimeout(timer);
       emberNarrator.stop();
     };
-  }, [inRun, locale, narrationText, profile.narrationEnabled, profile.soundEnabled]);
+  }, [inRun, narrationScript, profile.narrationEnabled, profile.soundEnabled]);
 
   useEffect(() => {
     if (!inRun || currentNode?.type !== 'ending' || !currentNode.endingId) return;
@@ -397,7 +435,18 @@ export function App() {
                   <button className="settings-row" onClick={() => {
                     const updated = { ...profile, narrationEnabled: !profile.narrationEnabled };
                     saveProfile(updated); setProfile(updated);
-                  }}><span>{locale === 'zh-CN' ? 'DM旁白' : 'DM narration'}</span><b>{profile.narrationEnabled ? 'ON' : 'OFF'}</b></button>
+                  }}><span>{locale === 'zh-CN' ? '英文DM旁白' : 'English DM narration'}</span><b>{profile.narrationEnabled ? 'ON' : 'OFF'}</b></button>
+                  <div className="audio-mixer">
+                    <label><span>{locale === 'zh-CN' ? '背景音乐' : 'Music'}</span><input aria-label={locale === 'zh-CN' ? '背景音乐音量' : 'Music volume'} type="range" min="0" max="100" value={Math.round(profile.musicVolume * 100)} onChange={(event) => {
+                      const updated = { ...profile, musicVolume: Number(event.target.value) / 100 };
+                      saveProfile(updated); setProfile(updated);
+                    }} /><b>{Math.round(profile.musicVolume * 100)}%</b></label>
+                    <label><span>{locale === 'zh-CN' ? 'DM人声' : 'DM voice'}</span><input aria-label={locale === 'zh-CN' ? 'DM人声音量' : 'DM voice volume'} type="range" min="0" max="100" value={Math.round(profile.narrationVolume * 100)} onChange={(event) => {
+                      const updated = { ...profile, narrationVolume: Number(event.target.value) / 100 };
+                      saveProfile(updated); setProfile(updated);
+                    }} /><b>{Math.round(profile.narrationVolume * 100)}%</b></label>
+                    <small>{locale === 'zh-CN' ? '旁白播放时，BGM会自动压低至背景层。' : 'Music automatically ducks beneath narration.'}</small>
+                  </div>
                   <button className="settings-row" onClick={() => { setDraftName(profile.playerName); setSigningMode('edit'); }}><span>{locale === 'zh-CN' ? '冒险者昵称' : 'Adventurer name'}</span><b>{profile.playerName || '—'}</b></button>
                 </article>
                 <article className="settings-card">
@@ -496,7 +545,7 @@ export function App() {
           <div className="ending-actions">
             {profile.narrationEnabled && <button className="secondary-button" onClick={() => {
               setNarrating(true);
-              if (!emberNarrator.speak(narrationText, locale, () => setNarrating(false))) setNarrating(false);
+              if (!emberNarrator.speak(narrationScript, () => setNarrating(false))) setNarrating(false);
             }}>{narrating ? (locale === 'zh-CN' ? 'DM 讲述中…' : 'DM speaking…') : (locale === 'zh-CN' ? '重听结局' : 'Replay ending')}</button>}
             <button className={`interest-button ${interestRecorded ? 'recorded' : ''}`} onClick={() => {
               setInterestRecorded(true);
@@ -515,11 +564,11 @@ export function App() {
           <section className="story-panel">
             <div className={`dm-narration ${narrating ? 'speaking' : ''}`}>
               <span className="dm-seal">DM</span>
-              <div><small>THE ASHEN CHRONICLER</small><strong>{narrating ? (locale === 'zh-CN' ? '灰烬记录者正在讲述' : 'The Chronicler is speaking') : (locale === 'zh-CN' ? '灰烬记录者' : 'The Ashen Chronicler')}</strong></div>
+              <div><small>THE ASHEN CHRONICLER · ENGLISH VO</small><strong>{narrating ? (locale === 'zh-CN' ? '英文旁白播放中 · 中文字幕' : 'English performance playing') : (locale === 'zh-CN' ? '英文配音 · 中文字幕' : 'English voice performance')}</strong></div>
               <span className="voice-wave" aria-hidden="true"><i /><i /><i /><i /></span>
               <button onClick={() => {
                 setNarrating(true);
-                if (!emberNarrator.speak(narrationText, locale, () => setNarrating(false))) setNarrating(false);
+                if (!emberNarrator.speak(narrationScript, () => setNarrating(false))) setNarrating(false);
               }} aria-label={locale === 'zh-CN' ? '重播旁白' : 'Replay narration'}>↻</button>
             </div>
             <span className="eyebrow">{localize(currentNode.eyebrow, locale)}</span>

@@ -12,6 +12,8 @@ export const defaultProfile: PlayerProfile = {
   locale: 'zh-CN',
   soundEnabled: true,
   narrationEnabled: true,
+  musicVolume: 0.65,
+  narrationVolume: 0.86,
   playerName: '',
 };
 

@@ -126,6 +126,11 @@ h1, h2, h3, p { margin-top: 0; }
 .settings-card { border: 1px solid var(--line); background: #15111c; padding: 24px; }
 .settings-card h3 { margin-bottom: 20px; }
 .settings-row { width: 100%; display: flex; justify-content: space-between; border: 0; border-top: 1px solid var(--line); background: transparent; color: #dcd1df; padding: 14px 0; cursor: pointer; }
+.audio-mixer { margin-top: 6px; padding: 12px; border: 1px solid #3c3042; background: #0d0a11; }
+.audio-mixer label { display: grid; grid-template-columns: 76px 1fr 38px; align-items: center; gap: 9px; min-height: 34px; color: #aaa0ad; font-size: .68rem; }
+.audio-mixer input { width: 100%; accent-color: #c78445; cursor: pointer; }
+.audio-mixer b { color: #e4cfaa; text-align: right; font: 700 .62rem Cinzel, serif; }
+.audio-mixer > small { display: block; margin-top: 8px; color: #756b79; font-size: .57rem; line-height: 1.5; }
 .pipeline-ok { color: var(--green); border: 1px solid #28584c; background: #0c1d19; padding: 10px; margin-top: 20px; font: 700 .75rem monospace; }
 .license-card { grid-column: 1 / -1; }
 .license-card p { color: #938898; line-height: 1.7; font-size: .78rem; }

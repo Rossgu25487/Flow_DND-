@@ -264,6 +264,8 @@ export interface PlayerProfile {
   locale: Locale;
   soundEnabled: boolean;
   narrationEnabled: boolean;
+  musicVolume: number;
+  narrationVolume: number;
   playerName: string;
 }
 
