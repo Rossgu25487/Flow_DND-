@@ -6,8 +6,10 @@ import type {
   BattleSnapshot,
   BattleUnitState,
   ContentPack,
+  EnemyIntent,
   LocalizedText,
   StatusId,
+  TargetPreview,
   UnitPersistentState,
 } from './types';
 import { SeededRng, type RandomSource } from './rng';
@@ -44,6 +46,7 @@ export class BattleRuntime {
   private selectedAbilityId: string | null = null;
   private events: BattleEvent[] = [];
   private eventId = 0;
+  private moveUndo: { unitId: string; x: number; y: number; moveRemaining: number; eventId: number } | null = null;
 
   constructor(pack: ContentPack, definition: BattleDefinition, seed: number, options: BattleRuntimeOptions = {}) {
     this.definition = definition;
@@ -116,6 +119,9 @@ export class BattleRuntime {
       outcome: this.outcome,
       selectedAbilityId: this.selectedAbilityId,
       reachableCells: active?.team === 'heroes' ? this.getReachableCells(active.id) : [],
+      enemyIntents: this.getEnemyIntents(),
+      targetPreviews: this.getTargetPreviews(),
+      canUndoMove: Boolean(this.moveUndo && active?.id === this.moveUndo.unitId && active.team === 'heroes'),
     };
   }
 
@@ -165,12 +171,29 @@ export class BattleRuntime {
     const cost = distances.get(`${x},${y}`);
     if (cost === undefined || cost <= 0 || cost > unit.moveRemaining) return false;
     const origin = { x: unit.x, y: unit.y };
+    const beforeEventId = this.eventId;
+    this.moveUndo = { unitId: unit.id, x: unit.x, y: unit.y, moveRemaining: unit.moveRemaining, eventId: beforeEventId };
     unit.x = x;
     unit.y = y;
     unit.moveRemaining -= cost;
     this.addEvent('move', text(`${unit.name['zh-CN']}移动了${cost}格`, `${unit.name['en-US']} moved ${cost} spaces`));
     this.resolveOpportunityAttacks(unit, origin);
+    if (this.events.some((event) => event.id > beforeEventId && (event.type === 'roll' || event.type === 'damage'))) this.moveUndo = null;
     this.checkOutcome();
+    return true;
+  }
+
+  undoLastMove(): boolean {
+    const unit = this.activeUnit;
+    const undo = this.moveUndo;
+    if (!unit || !undo || unit.id !== undo.unitId || unit.team !== 'heroes') return false;
+    unit.x = undo.x;
+    unit.y = undo.y;
+    unit.moveRemaining = undo.moveRemaining;
+    this.events = this.events.filter((event) => event.id <= undo.eventId);
+    this.eventId = undo.eventId;
+    this.moveUndo = null;
+    this.addEvent('move', text(`${unit.name['zh-CN']}撤回移动`, `${unit.name['en-US']} undoes the move`));
     return true;
   }
 
@@ -181,6 +204,7 @@ export class BattleRuntime {
     if (distance(unit, object) > 1) return false;
     object.active = false;
     unit.actionAvailable = false;
+    this.moveUndo = null;
     this.selectedAbilityId = null;
     this.addEvent(
       'objective',
@@ -193,12 +217,14 @@ export class BattleRuntime {
   endTurn(): void {
     if (this.outcome !== 'playing') return;
     this.selectedAbilityId = null;
+    this.moveUndo = null;
     this.advanceTurn();
   }
 
   runEnemyTurn(): void {
     const enemy = this.activeUnit;
     if (!enemy || enemy.team !== 'enemies' || this.outcome !== 'playing') return;
+    this.moveUndo = null;
     const heroes = this.units.filter((unit) => unit.team === 'heroes' && unit.hp > 0);
     if (!heroes.length) {
       this.checkOutcome();
@@ -233,6 +259,7 @@ export class BattleRuntime {
 
   private advanceTurn(): void {
     if (this.outcome !== 'playing') return;
+    this.moveUndo = null;
     let attempts = 0;
     do {
       this.turnIndex += 1;
@@ -263,6 +290,7 @@ export class BattleRuntime {
 
   private resolveAbility(unit: BattleUnitState, ability: AbilityDefinition, target: BattleUnitState): boolean {
     if (!this.canPay(unit, ability) || distance(unit, target) > ability.range) return false;
+    this.moveUndo = null;
     this.pay(unit, ability);
 
     if (ability.utility === 'action-surge') {
@@ -340,20 +368,8 @@ export class BattleRuntime {
   }
 
   private resolveAttack(unit: BattleUnitState, target: BattleUnitState, ability: AbilityDefinition, opportunity = false): void {
-    const melee = ability.range <= 1;
-    const allyAdjacent = this.units.some(
-      (candidate) => candidate.team === unit.team && candidate.id !== unit.id && candidate.hp > 0 && distance(candidate, target) <= 1,
-    );
-    const advantage =
-      hasStatus(unit, 'advantage-next') || hasStatus(unit, 'hidden') || (melee && hasStatus(target, 'prone')) ||
-      (unit.tags.includes('pack-tactics') && allyAdjacent);
-    const disadvantage = hasStatus(unit, 'prone') || (!melee && hasStatus(target, 'prone'));
-    const attackBonus = (ability.attackBonus ?? 0) + (unit.team === 'enemies' && this.veteran ? 1 : 0);
+    const { advantage, disadvantage, attackBonus, armorClass, allyAdjacent } = this.getAttackContext(unit, target, ability);
     const roll = rollD20(this.rng, attackBonus, advantage, disadvantage);
-    const coverBonus = !melee && this.terrainMap.get(`${target.x},${target.y}`) === 'cover' ? 2 : 0;
-    const pylonBonus =
-      target.id === this.definition.bossUnitId ? this.objects.filter((object) => object.kind === 'pylon' && object.active).length : 0;
-    const armorClass = target.ac + coverBonus + pylonBonus + (hasStatus(target, 'guarded') ? 2 : 0);
     const hit = attackHits(roll, armorClass);
     this.addEvent(
       'roll',
@@ -397,6 +413,23 @@ export class BattleRuntime {
       );
     }
     if (!opportunity) unit.statuses = unit.statuses.filter((status) => status !== 'advantage-next' && status !== 'hidden');
+  }
+
+  private getAttackContext(unit: BattleUnitState, target: BattleUnitState, ability: AbilityDefinition) {
+    const melee = ability.range <= 1;
+    const allyAdjacent = this.units.some(
+      (candidate) => candidate.team === unit.team && candidate.id !== unit.id && candidate.hp > 0 && distance(candidate, target) <= 1,
+    );
+    const advantage =
+      hasStatus(unit, 'advantage-next') || hasStatus(unit, 'hidden') || (melee && hasStatus(target, 'prone')) ||
+      (unit.tags.includes('pack-tactics') && allyAdjacent);
+    const disadvantage = hasStatus(unit, 'prone') || (!melee && hasStatus(target, 'prone'));
+    const attackBonus = (ability.attackBonus ?? 0) + (unit.team === 'enemies' && this.veteran ? 1 : 0);
+    const coverBonus = !melee && this.terrainMap.get(`${target.x},${target.y}`) === 'cover' ? 2 : 0;
+    const pylonBonus =
+      target.id === this.definition.bossUnitId ? this.objects.filter((object) => object.kind === 'pylon' && object.active).length : 0;
+    const armorClass = target.ac + coverBonus + pylonBonus + (hasStatus(target, 'guarded') ? 2 : 0);
+    return { advantage, disadvantage, attackBonus, armorClass, allyAdjacent };
   }
 
   private applyDamage(
@@ -482,6 +515,91 @@ export class BattleRuntime {
       moved += 1;
     }
     if (moved) this.addEvent('move', text(`${target.name['zh-CN']}被推开${moved}格`, `${target.name['en-US']} is pushed ${moved} spaces`));
+  }
+
+  private getEnemyIntents(): EnemyIntent[] {
+    const heroes = this.units.filter((unit) => unit.team === 'heroes' && unit.hp > 0);
+    if (!heroes.length) return [];
+    return this.units.filter((unit) => unit.team === 'enemies' && unit.hp > 0).map((enemy) => {
+      const target = [...heroes].sort((a, b) => distance(enemy, a) - distance(enemy, b) || a.hp - b.hp)[0];
+      const available = enemy.abilities.filter((ability) => ability.target === 'enemy' && this.canPay(enemy, ability));
+      let chosen = available.find(
+        (ability) => ability.tags?.includes('area') && distance(enemy, target) <= ability.range && (enemy.resources.flare ?? 0) > 0,
+      );
+      chosen ??= available.find((ability) => distance(enemy, target) <= ability.range);
+      chosen ??= [...available].sort((a, b) => b.range - a.range)[0];
+      const kind: EnemyIntent['kind'] = chosen && distance(enemy, target) <= chosen.range ? 'attack' : 'advance';
+      return {
+        unitId: enemy.id,
+        targetId: target.id,
+        abilityId: chosen?.id ?? null,
+        kind,
+        estimatedDamage: chosen?.damage ? `${chosen.damage.dice}${chosen.damage.bonus ? `+${chosen.damage.bonus}` : ''}` : null,
+      };
+    });
+  }
+
+  private getTargetPreviews(): TargetPreview[] {
+    const unit = this.activeUnit;
+    if (!unit || unit.team !== 'heroes' || !this.selectedAbilityId) return [];
+    const ability = unit.abilities.find((candidate) => candidate.id === this.selectedAbilityId);
+    if (!ability || ability.target !== 'enemy') return [];
+    const range = this.getDamageRange(ability);
+    return this.units.filter((target) => target.team !== unit.team && target.hp > 0).map((target) => {
+      const inRange = distance(unit, target) <= ability.range;
+      let chance: number | null = null;
+      let targetNumber: number | null = null;
+      let rollMode: TargetPreview['rollMode'] = null;
+      let advantage = false;
+      let disadvantage = false;
+      if (ability.kind === 'attack') {
+        const context = this.getAttackContext(unit, target, ability);
+        advantage = context.advantage;
+        disadvantage = context.disadvantage;
+        targetNumber = context.armorClass;
+        rollMode = 'attack';
+        chance = this.getD20Chance(context.attackBonus, context.armorClass, advantage, disadvantage);
+      } else if (ability.kind === 'save' && ability.save) {
+        targetNumber = ability.save.dc;
+        rollMode = 'save';
+        const saveChance = this.getD20Chance(target.saves[ability.save.ability] ?? 0, ability.save.dc, false, false);
+        chance = 100 - saveChance;
+      } else if (ability.kind === 'auto-damage') {
+        chance = 100;
+        rollMode = 'automatic';
+      }
+      return {
+        targetId: target.id,
+        inRange,
+        chance,
+        minDamage: range?.min ?? null,
+        maxDamage: range?.max ?? null,
+        targetNumber,
+        rollMode,
+        advantage,
+        disadvantage,
+      };
+    });
+  }
+
+  private getD20Chance(modifier: number, target: number, advantage: boolean, disadvantage: boolean): number {
+    let successes = 0;
+    for (let roll = 1; roll <= 20; roll += 1) {
+      if (roll !== 1 && (roll === 20 || roll + modifier >= target)) successes += 1;
+    }
+    const base = successes / 20;
+    const probability = advantage === disadvantage ? base : advantage ? 1 - (1 - base) ** 2 : base ** 2;
+    return Math.round(probability * 100);
+  }
+
+  private getDamageRange(ability: AbilityDefinition): { min: number; max: number } | null {
+    if (!ability.damage) return null;
+    const match = /^(\d+)d(\d+)$/.exec(ability.damage.dice);
+    if (!match) return null;
+    const count = Number(match[1]);
+    const sides = Number(match[2]);
+    const bonus = ability.damage.bonus ?? 0;
+    return { min: Math.max(0, count + bonus), max: Math.max(0, count * sides + bonus) };
   }
 
   private addStatus(unit: BattleUnitState, status: StatusId): void {

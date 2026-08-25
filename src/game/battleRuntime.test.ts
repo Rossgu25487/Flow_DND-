@@ -5,6 +5,31 @@ import { BattleRuntime } from './battleRuntime';
 const manhattan = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
 
 describe('battle runtime', () => {
+  it('exposes enemy intent, target odds, and a safe movement undo for the active hero', () => {
+    const battle = ashenBeaconPack.battles.find((entry) => entry.id === 'outer-ward')!;
+    const runtime = new BattleRuntime(ashenBeaconPack, battle, 77, { initialAdvantage: true });
+    while (runtime.activeUnit?.team === 'enemies') runtime.runEnemyTurn();
+
+    const before = runtime.getSnapshot();
+    const active = before.units.find((unit) => unit.id === before.activeUnitId)!;
+    expect(before.enemyIntents).toHaveLength(3);
+    expect(before.enemyIntents.every((intent) => intent.targetId)).toBe(true);
+
+    const attack = active.abilities.find((ability) => ability.target === 'enemy')!;
+    expect(runtime.selectAbility(attack.id)).toBe(true);
+    const preview = runtime.getSnapshot().targetPreviews;
+    expect(preview).toHaveLength(3);
+    expect(preview.every((target) => target.chance === null || (target.chance >= 0 && target.chance <= 100))).toBe(true);
+
+    const cell = runtime.getSnapshot().reachableCells[0];
+    const origin = { x: active.x, y: active.y, moveRemaining: active.moveRemaining };
+    expect(runtime.moveActiveUnit(cell.x, cell.y)).toBe(true);
+    expect(runtime.getSnapshot().canUndoMove).toBe(true);
+    expect(runtime.undoLastMove()).toBe(true);
+    const restored = runtime.getSnapshot().units.find((unit) => unit.id === active.id)!;
+    expect({ x: restored.x, y: restored.y, moveRemaining: restored.moveRemaining }).toEqual(origin);
+  });
+
   it('can complete the first encounter through serializable player decisions and enemy AI', () => {
     const battle = ashenBeaconPack.battles.find((entry) => entry.id === 'outer-ward')!;
     const runtime = new BattleRuntime(ashenBeaconPack, battle, 42, { initialAdvantage: true });

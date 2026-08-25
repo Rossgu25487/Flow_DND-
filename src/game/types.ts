@@ -151,6 +151,26 @@ export interface BattleEvent {
   };
 }
 
+export interface EnemyIntent {
+  unitId: string;
+  targetId: string;
+  abilityId: string | null;
+  kind: 'attack' | 'advance';
+  estimatedDamage: string | null;
+}
+
+export interface TargetPreview {
+  targetId: string;
+  inRange: boolean;
+  chance: number | null;
+  minDamage: number | null;
+  maxDamage: number | null;
+  targetNumber: number | null;
+  rollMode: 'attack' | 'save' | 'automatic' | null;
+  advantage: boolean;
+  disadvantage: boolean;
+}
+
 export interface BattleSnapshot {
   battleId: string;
   round: number;
@@ -161,6 +181,9 @@ export interface BattleSnapshot {
   outcome: 'playing' | 'victory' | 'defeat';
   selectedAbilityId: string | null;
   reachableCells: Array<{ x: number; y: number }>;
+  enemyIntents: EnemyIntent[];
+  targetPreviews: TargetPreview[];
+  canUndoMove: boolean;
 }
 
 export type StoryEffect =

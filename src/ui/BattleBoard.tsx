@@ -9,11 +9,14 @@ import sableSpriteUrl from '../assets/sprites/sable.png';
 import { emberAudio } from '../game/audio';
 import { BattleRuntime, type BattleRuntimeOptions } from '../game/battleRuntime';
 import { localize } from '../game/i18n';
+import { track } from '../game/profile';
 import type { AbilityDefinition, BattleDefinition, BattleEvent, BattleSnapshot, BattleUnitState, ContentPack, Locale } from '../game/types';
 
 export interface BattleBoardHandle {
   selectAbility: (abilityId: string) => void;
   endTurn: () => void;
+  undoMove: () => void;
+  setSpeed: (multiplier: number) => void;
 }
 
 interface BattleBoardProps {
@@ -30,6 +33,8 @@ interface BattleBoardProps {
 interface SceneApi {
   selectAbility: (abilityId: string) => void;
   endTurn: () => void;
+  undoMove: () => void;
+  setSpeed: (multiplier: number) => void;
 }
 
 const heroGlyph: Record<string, string> = {
@@ -62,6 +67,8 @@ export const BattleBoard = forwardRef<BattleBoardHandle, BattleBoardProps>(funct
   useImperativeHandle(ref, () => ({
     selectAbility: (abilityId) => apiRef.current?.selectAbility(abilityId),
     endTurn: () => apiRef.current?.endTurn(),
+    undoMove: () => apiRef.current?.undoMove(),
+    setSpeed: (multiplier) => apiRef.current?.setSpeed(multiplier),
   }));
 
   useEffect(() => {
@@ -86,6 +93,7 @@ export const BattleBoard = forwardRef<BattleBoardHandle, BattleBoardProps>(funct
       private objectViews = new Map<string, Phaser.GameObjects.Container>();
       private lastActiveUnitId: string | null = null;
       private introShown = false;
+      private speedMultiplier = 1;
 
       constructor() {
         super({ key: 'tactical-board' });
@@ -136,6 +144,12 @@ export const BattleBoard = forwardRef<BattleBoardHandle, BattleBoardProps>(funct
             runtime.endTurn();
             this.sync();
           },
+          undoMove: () => this.undoMove(),
+          setSpeed: (multiplier) => {
+            this.speedMultiplier = multiplier;
+            this.tweens.timeScale = multiplier;
+            this.time.timeScale = multiplier;
+          },
         };
         this.sync();
       }
@@ -155,6 +169,7 @@ export const BattleBoard = forwardRef<BattleBoardHandle, BattleBoardProps>(funct
           emberAudio.play('ui');
           return;
         }
+        track('battle_ability_selected', { battleId: battle.id, unitId: active.id, abilityId, selected: runtime.getSnapshot().selectedAbilityId === abilityId });
         if (ability.target === 'self') {
           const after = runtime.getSnapshot();
           const event = findLastEvent(this.eventsSince(before, after), (candidate) => candidate.type === 'heal');
@@ -209,13 +224,52 @@ export const BattleBoard = forwardRef<BattleBoardHandle, BattleBoardProps>(funct
         });
       }
 
+      private undoMove(): void {
+        if (this.animating) return;
+        const before = runtime.getSnapshot();
+        const actor = before.units.find((unit) => unit.id === before.activeUnitId);
+        const view = actor ? this.tokenViews.get(actor.id) : undefined;
+        if (!actor || !view || !runtime.undoLastMove()) {
+          emberAudio.play('ui');
+          return;
+        }
+        track('battle_move_undo', { battleId: battle.id, unitId: actor.id });
+        const after = runtime.getSnapshot();
+        const restored = after.units.find((unit) => unit.id === actor.id);
+        if (!restored) return;
+        const target = this.toWorld(restored.x, restored.y);
+        this.animating = true;
+        this.input.enabled = false;
+        emberAudio.play('move');
+        onSnapshot(after);
+        this.tweens.add({
+          targets: view,
+          x: target.x,
+          y: target.y,
+          duration: 240,
+          ease: 'Sine.InOut',
+          onComplete: () => {
+            this.animating = false;
+            this.input.enabled = true;
+            this.sync();
+          },
+        });
+      }
+
       private performTargetAction(targetId: string): void {
         if (this.animating) return;
         const before = runtime.getSnapshot();
         const actor = before.units.find((unit) => unit.id === before.activeUnitId);
         const ability = actor?.abilities.find((candidate) => candidate.id === before.selectedAbilityId);
         const target = before.units.find((unit) => unit.id === targetId);
-        if (!actor || !ability || !target || !runtime.useSelectedOnUnit(targetId)) return;
+        if (!actor || !ability || !target) return;
+        if (!runtime.useSelectedOnUnit(targetId)) {
+          track('battle_invalid_target', { battleId: battle.id, unitId: actor.id, abilityId: ability.id, targetId });
+          emberAudio.play('ui');
+          const targetView = this.tokenViews.get(targetId);
+          if (targetView) this.floatText(targetView.x, targetView.y - 25, locale === 'zh-CN' ? '目标无效或超出射程' : 'INVALID / OUT OF RANGE', '#d8b87c', false);
+          return;
+        }
         const after = runtime.getSnapshot();
         onSnapshot(after);
         this.animateAction(actor, target, ability, before, after);
@@ -620,7 +674,8 @@ export const BattleBoard = forwardRef<BattleBoardHandle, BattleBoardProps>(funct
         const snapshot = runtime.getSnapshot();
         const active = snapshot.units.find((unit) => unit.id === snapshot.activeUnitId);
         const reachable = new Set(snapshot.reachableCells.map((cell) => `${cell.x},${cell.y}`));
-        const selectedAbility = active?.abilities.find((ability) => ability.id === snapshot.selectedAbilityId);
+        const previewByTarget = new Map(snapshot.targetPreviews.map((preview) => [preview.targetId, preview]));
+        const intentByUnit = new Map(snapshot.enemyIntents.map((intent) => [intent.unitId, intent]));
 
         this.add.rectangle(boardX + boardWidth / 2, boardY + boardHeight / 2, boardWidth + 20, boardHeight + 20, 0x120e18, 1)
           .setStrokeStyle(3, 0x9a643b, 0.7)
@@ -679,10 +734,9 @@ export const BattleBoard = forwardRef<BattleBoardHandle, BattleBoardProps>(funct
         for (const unit of snapshot.units.filter((candidate) => candidate.hp > 0)) {
           const point = this.toWorld(unit.x, unit.y);
           const isActive = unit.id === snapshot.activeUnitId;
-          const inRange = Boolean(
-            active && selectedAbility && selectedAbility.target === 'enemy' && unit.team !== active.team &&
-              Math.abs(active.x - unit.x) + Math.abs(active.y - unit.y) <= selectedAbility.range,
-          );
+          const preview = previewByTarget.get(unit.id);
+          const intent = intentByUnit.get(unit.id);
+          const inRange = Boolean(preview?.inRange);
           const shadow = this.add.ellipse(0, 16, 43, 15, 0x000000, 0.55);
           const activeHalo = this.add.circle(0, 0, isActive ? 28 : 24, isActive ? 0xf2bd68 : unit.color, isActive ? 0.16 : 0.09)
             .setStrokeStyle(isActive ? 3 : 1, isActive ? 0xffcf77 : unit.accent, isActive ? 1 : 0.35);
@@ -695,6 +749,20 @@ export const BattleBoard = forwardRef<BattleBoardHandle, BattleBoardProps>(funct
           const hpText = this.add.text(0, 37, `${unit.hp}/${unit.maxHp}`, { color: '#e7dce8', fontFamily: 'sans-serif', fontSize: '9px', stroke: '#100a0e', strokeThickness: 3 }).setOrigin(0.5);
           const pieces: Phaser.GameObjects.GameObject[] = [shadow, activeHalo, body, ...(sprite ? [sprite] : []), icon, hpBase, hpFill, hpText];
           if (inRange) pieces.push(this.add.circle(0, 0, 27, 0xff615d, 0.08).setStrokeStyle(2, 0xff7b6e, 0.95));
+          if (preview?.inRange && preview.chance !== null) {
+            const chanceColor = preview.chance >= 65 ? 0x6fe0b4 : preview.chance >= 40 ? 0xe2b768 : 0xe36d5a;
+            const damage = preview.minDamage !== null && preview.maxDamage !== null ? ` · ${preview.minDamage}-${preview.maxDamage}` : '';
+            const edge = preview.advantage ? ' ▲' : preview.disadvantage ? ' ▼' : '';
+            pieces.push(this.add.rectangle(0, -46, 72, 17, 0x0a080d, 0.92).setStrokeStyle(1, chanceColor, 0.9));
+            pieces.push(this.add.text(0, -46, `${preview.chance}%${damage}${edge}`, { color: `#${chanceColor.toString(16).padStart(6, '0')}`, fontFamily: 'sans-serif', fontSize: '9px', fontStyle: 'bold' }).setOrigin(0.5));
+          } else if (intent) {
+            const intentTarget = snapshot.units.find((candidate) => candidate.id === intent.targetId);
+            const intentColor = intent.kind === 'attack' ? 0xe36d5a : 0xd0a15f;
+            const targetInitial = intentTarget ? localize(intentTarget.name, locale).slice(0, 1) : '?';
+            const damage = intent.estimatedDamage ? ` · ${intent.estimatedDamage}` : '';
+            pieces.push(this.add.rectangle(0, -46, 88, 17, 0x0a080d, 0.92).setStrokeStyle(1, intentColor, 0.88));
+            pieces.push(this.add.text(0, -46, `${intent.kind === 'attack' ? '⚔' : '➜'} → ${targetInitial}${damage}`, { color: `#${intentColor.toString(16).padStart(6, '0')}`, fontFamily: 'sans-serif', fontSize: '9px', fontStyle: 'bold' }).setOrigin(0.5));
+          }
           if (unit.statuses.includes('advantage-next')) pieces.push(this.add.text(19, -27, '▲', { color: '#8ef2c7', fontSize: '12px', stroke: '#102018', strokeThickness: 3 }).setOrigin(0.5));
           const token = this.add.container(point.x, point.y, pieces).setDepth(20).setSize(54, 74).setInteractive({ useHandCursor: inRange });
           token.on('pointerdown', () => this.performTargetAction(unit.id));
@@ -725,7 +793,7 @@ export const BattleBoard = forwardRef<BattleBoardHandle, BattleBoardProps>(funct
             if (!actorId) return;
             runtime.runEnemyTurn();
             this.animateEnemyTurn(before, runtime.getSnapshot(), actorId);
-          }, 680);
+          }, 680 / this.speedMultiplier);
         }
       }
     }
