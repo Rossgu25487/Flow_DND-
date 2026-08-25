@@ -208,11 +208,13 @@ h1, h2, h3, p { margin-top: 0; }
 .dice-rings::after { inset: 43px; }
 .d20-shape { position: relative; width: 122px; height: 122px; display: grid; place-items: center; background: linear-gradient(145deg, #d9a750, #744125); clip-path: polygon(50% 0, 95% 25%, 88% 78%, 50% 100%, 12% 78%, 5% 25%); filter: drop-shadow(0 14px 20px rgba(0,0,0,.6)) drop-shadow(0 0 28px rgba(229,127,59,.28)); }
 .d20-shape::after { content: ''; position: absolute; inset: 5px; clip-path: inherit; border: 1px solid rgba(255,232,174,.28); background: linear-gradient(35deg, transparent 48%, rgba(255,255,255,.13) 49% 51%, transparent 52%); }
-.d20-shape span { position: relative; z-index: 2; width: 88px; height: 88px; display: grid; place-items: center; background: radial-gradient(circle at 50% 36%, #241827, #110c14); clip-path: inherit; color: #ffe3a5; font: 700 2.5rem Cinzel, serif; }
+.d20-shape span { position: relative; z-index: 2; width: 92px; height: 92px; display: grid; place-items: center; background: radial-gradient(circle at 50% 36%, #241827, #110c14); clip-path: inherit; color: #ffe3a5; font: 700 2.9rem Cinzel, serif; }
 .check-card.rolling .d20-shape { animation: dice-roll 1.05s cubic-bezier(.24,.72,.27,1); }
-.check-card.rolling .dice-rings { animation: rune-spin 4s linear infinite; }
+.check-card.rolling .dice-rings { animation: rune-spin 5.4s linear infinite; }
 .check-card.rolling .dice-stage { height: 430px; margin: 0; }
 .check-card.rolling .check-resolution { display: none; }
+.check-card.rolling .d20-shape { width: 154px; height: 154px; }
+.check-card.rolling .d20-shape span { width: 112px; height: 112px; }
 .check-resolution { transition: opacity .3s ease, transform .3s ease; }
 .check-resolution[aria-hidden='true'] { opacity: 0; transform: translateY(12px); pointer-events: none; }
 .check-card h2 { font-size: 2rem; margin: 0 0 14px; color: var(--green); }
@@ -223,6 +225,7 @@ h1, h2, h3, p { margin-top: 0; }
 .check-math span small { display: block; color: #736979; font: 500 .48rem sans-serif; letter-spacing: .12em; }
 .check-math strong { color: #fff; font: 700 1.55rem Cinzel, serif; }
 .check-math em { padding: 6px 9px; border-left: 1px solid #70513a; font-style: normal; color: var(--gold); }
+.roll-timeout { display: block; color: #a0899b; font-size: .64rem; letter-spacing: .14em; margin: 8px 0 0; }
 .check-card p { color: #b7abbc; line-height: 1.65; margin: 18px 0 24px; }
 
 .battle-screen { min-height: calc(100vh - 66px); padding: 24px clamp(14px, 2.5vw, 40px) 36px; }

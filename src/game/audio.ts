@@ -29,11 +29,33 @@ class EmberAudioEngine {
   private mixFade: number | null = null;
   private musicDuck = 1;
   private musicVolume = 0.65;
+  private readonly baseMusicVolume: Record<'menu' | 'battle', number> = { menu: 0.12, battle: 0.10 };
+  private readonly uiVolumes: Record<SoundCue, number> = {
+    ui: 0.045,
+    dice: 0.048,
+    move: 0.06,
+    swing: 0.13,
+    arrow: 0.1,
+    hit: 0.14,
+    crit: 0.2,
+    spell: 0.12,
+    heal: 0.1,
+    pylon: 0.14,
+    victory: 0.1,
+    defeat: 0.09,
+  };
+  private readonly narrativeCueGain: Record<NarrativeSoundCue, number> = {
+    fire: 0.028,
+    rumble: 0.022,
+    wind: 0.018,
+    ritual: 0.028,
+    dragon: 0.036,
+  };
   private readonly music = new Map<'menu' | 'battle', HTMLAudioElement>();
 
   setEnabled(enabled: boolean): void {
     this.enabled = enabled;
-    if (this.master) this.master.gain.setTargetAtTime(enabled ? 0.34 : 0, this.context?.currentTime ?? 0, 0.03);
+    if (this.master) this.master.gain.setTargetAtTime(enabled ? 0.30 : 0, this.context?.currentTime ?? 0, 0.03);
     if (!enabled) {
       for (const track of this.music.values()) track.pause();
     } else if (this.desiredMusic) {
@@ -46,7 +68,7 @@ class EmberAudioEngine {
     if (!this.context) {
       this.context = new AudioContext();
       this.master = this.context.createGain();
-      this.master.gain.value = 0.34;
+      this.master.gain.value = 0.30;
       this.master.connect(this.context.destination);
       this.noiseBuffer = this.createNoiseBuffer();
     }
@@ -60,53 +82,53 @@ class EmberAudioEngine {
       const now = this.context.currentTime;
       switch (cue) {
         case 'ui':
-          this.noise(0.035, 520, 0.07, 220);
+          this.noise(0.035, 520, this.uiVolumes.ui, 220);
           break;
         case 'dice':
           for (let index = 0; index < 5; index += 1) {
-            window.setTimeout(() => this.noise(0.025, 900 + index * 130, 0.07), index * 28);
+            window.setTimeout(() => this.noise(0.025, 900 + index * 130, this.uiVolumes.dice), index * 28);
           }
           break;
         case 'move':
-          this.noise(0.07, 170, 0.08);
+          this.noise(0.07, 170, this.uiVolumes.move);
           break;
         case 'swing':
-          this.noise(0.12, 520, 0.16, 180);
-          this.tone(190, 90, 0.1, 0.07, 'sawtooth');
+          this.noise(0.12, 520, this.uiVolumes.swing, 180);
+          this.tone(190, 90, this.uiVolumes.swing * 0.55, 0.07, 'sawtooth');
           break;
         case 'arrow':
-          this.noise(0.1, 1800, 0.1, 560);
-          this.tone(640, 220, 0.09, 0.045, 'triangle');
+          this.noise(0.1, 1800, this.uiVolumes.arrow, 560);
+          this.tone(640, 220, this.uiVolumes.arrow * 0.9, 0.045, 'triangle');
           break;
         case 'hit':
-          this.noise(0.11, 230, 0.25);
-          this.tone(110, 54, 0.13, 0.18, 'square');
+          this.noise(0.11, 230, this.uiVolumes.hit);
+          this.tone(110, 54, this.uiVolumes.hit * 1.1, 0.18, 'square');
           break;
         case 'crit':
-          this.noise(0.18, 360, 0.34);
-          this.tone(135, 46, 0.2, 0.26, 'sawtooth');
-          window.setTimeout(() => this.tone(720, 960, 0.12, 0.09, 'triangle'), 45);
+          this.noise(0.18, 360, this.uiVolumes.crit);
+          this.tone(135, 46, this.uiVolumes.crit * 1.1, 0.26, 'sawtooth');
+          window.setTimeout(() => this.tone(720, 960, this.uiVolumes.crit * 0.6, 0.09, 'triangle'), 45);
           break;
         case 'spell':
-          this.tone(230, 780, 0.24, 0.14, 'sine');
-          this.tone(345, 1040, 0.2, 0.08, 'triangle', 0.025);
-          this.noise(0.2, 1450, 0.08);
+          this.tone(230, 780, this.uiVolumes.spell * 2, 0.14, 'sine');
+          this.tone(345, 1040, this.uiVolumes.spell * 1.6, 0.08, 'triangle', 0.025);
+          this.noise(0.2, 1450, this.uiVolumes.spell * 0.64);
           break;
         case 'heal':
-          this.tone(380, 620, 0.28, 0.08, 'sine');
-          this.tone(570, 820, 0.24, 0.055, 'sine', 0.06);
+          this.tone(380, 620, this.uiVolumes.heal * 2.4, 0.08, 'sine');
+          this.tone(570, 820, this.uiVolumes.heal * 2, 0.055, 'sine', 0.06);
           break;
         case 'pylon':
-          this.tone(170, 58, 0.48, 0.18, 'sawtooth');
-          this.noise(0.32, 420, 0.14);
+          this.tone(170, 58, this.uiVolumes.pylon * 3.4, 0.18, 'sawtooth');
+          this.noise(0.32, 420, this.uiVolumes.pylon * 1);
           break;
         case 'victory':
           [262, 330, 392, 523].forEach((frequency, index) => {
-            window.setTimeout(() => this.tone(frequency, frequency * 1.01, 0.36, 0.08, 'triangle'), index * 105);
+            window.setTimeout(() => this.tone(frequency, frequency * 1.01, this.uiVolumes.victory * 2.5, 0.08, 'triangle'), index * 105);
           });
           break;
         case 'defeat':
-          this.tone(150, 52, 0.8, 0.18, 'sawtooth');
+          this.tone(150, 52, this.uiVolumes.defeat * 7, 0.18, 'sawtooth');
           break;
         default:
           this.tone(440, 440, 0.05, 0.05, 'sine');
@@ -120,29 +142,29 @@ class EmberAudioEngine {
     void this.unlock().then(() => {
       if (!this.context || !this.master) return;
       if (cue === 'fire') {
-        this.noise(1.25, 920, 0.035, 420);
-        this.tone(58, 42, 1.35, 0.025, 'sine');
+        this.noise(1.25, 920, this.narrativeCueGain.fire, 420);
+        this.tone(58, 42, this.narrativeCueGain.fire * 2.8, 0.025, 'sine');
         for (let index = 0; index < 7; index += 1) {
-          window.setTimeout(() => this.noise(0.045, 1400 + index * 170, 0.025, 620), 90 + index * 145);
+          window.setTimeout(() => this.noise(0.045, 1400 + index * 170, this.narrativeCueGain.fire * 0.65, 620), 90 + index * 145);
         }
       }
       if (cue === 'rumble') {
-        this.tone(62, 31, 1.7, 0.065, 'sine');
-        this.noise(1.5, 230, 0.035, 80);
+        this.tone(62, 31, this.narrativeCueGain.rumble * 3.2, 0.065, 'sine');
+        this.noise(1.5, 230, this.narrativeCueGain.rumble * 1.6, 80);
       }
       if (cue === 'wind') {
-        this.noise(1.8, 720, 0.035, 310);
-        this.tone(145, 105, 1.5, 0.012, 'sine');
+        this.noise(1.8, 720, this.narrativeCueGain.wind, 310);
+        this.tone(145, 105, this.narrativeCueGain.wind * 2.2, 0.012, 'sine');
       }
       if (cue === 'ritual') {
-        this.tone(92, 138, 1.65, 0.038, 'sine');
-        this.tone(139, 77, 1.45, 0.026, 'triangle', 0.08);
-        this.noise(1.1, 520, 0.022, 190);
+        this.tone(92, 138, this.narrativeCueGain.ritual * 2.4, 0.038, 'sine');
+        this.tone(139, 77, this.narrativeCueGain.ritual * 1.9, 0.026, 'triangle', 0.08);
+        this.noise(1.1, 520, this.narrativeCueGain.ritual * 0.78, 190);
       }
       if (cue === 'dragon') {
-        this.tone(74, 36, 1.65, 0.085, 'sawtooth');
-        this.tone(111, 49, 1.4, 0.045, 'square', 0.04);
-        this.noise(1.55, 280, 0.075, 72);
+        this.tone(74, 36, this.narrativeCueGain.dragon * 2, 0.085, 'sawtooth');
+        this.tone(111, 49, this.narrativeCueGain.dragon * 1.6, 0.045, 'square', 0.04);
+        this.noise(1.55, 280, this.narrativeCueGain.dragon * 1.8, 72);
       }
     });
   }
@@ -273,8 +295,7 @@ class EmberAudioEngine {
   }
 
   private musicTarget(mode: 'menu' | 'battle'): number {
-    const base = mode === 'battle' ? 0.16 : 0.18;
-    return base * this.musicVolume * this.musicDuck;
+    return this.baseMusicVolume[mode] * this.musicVolume * this.musicDuck;
   }
 
   private rampCurrentMusic(target: number, duration: number): void {

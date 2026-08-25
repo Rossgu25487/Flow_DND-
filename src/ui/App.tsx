@@ -123,11 +123,7 @@ export function App() {
       usedCues.add(cue);
       return true;
     });
-    const body = splitNarration(currentNode.text['en-US']).map((sentence) => ({
-      text: sentence,
-      mood: storyMood(currentNode.id, sentence),
-      cues: withFreshCues(sentence),
-    }));
+    const body = splitNarration(currentNode.text['en-US']);
     const nodeSpecificCues = nodeCues(currentNode.id);
     const segments: NarrationSegment[] = [
       ...(currentNode.id === contract.startNodeId ? [{ text: 'Contract-bearer. Your company has been summoned.', mood: 'address' as const }] : []),

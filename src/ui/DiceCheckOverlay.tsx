@@ -15,17 +15,20 @@ interface DiceCheckOverlayProps {
 export function DiceCheckOverlay({ choice, result, success, locale, onFinish }: DiceCheckOverlayProps) {
   const [phase, setPhase] = useState<'rolling' | 'resolved'>('rolling');
   const [face, setFace] = useState(1);
+  const [resolvedMs, setResolvedMs] = useState(0);
   const check = choice.check!;
   const copy = uiCopy[locale];
 
   useEffect(() => {
     const ticker = window.setInterval(() => setFace(Math.floor(Math.random() * 20) + 1), 90);
+    const start = window.performance.now();
     const reveal = window.setTimeout(() => {
       window.clearInterval(ticker);
       setFace(result.chosen);
       setPhase('resolved');
+      setResolvedMs(Math.max(0, Math.round((window.performance.now() - start) / 100) / 10));
       emberAudio.play(result.natural20 ? 'crit' : result.natural1 ? 'defeat' : 'dice');
-    }, 1420);
+    }, 1750);
     return () => {
       window.clearInterval(ticker);
       window.clearTimeout(reveal);
@@ -46,6 +49,9 @@ export function DiceCheckOverlay({ choice, result, success, locale, onFinish }: 
           <div className="check-math">
             <span><small>D20</small>{result.chosen}</span><b>+</b><span><small>MOD</small>{result.modifier}</span><b>=</b><strong>{result.total}</strong><em>{copy.dc} {check.dc}</em>
           </div>
+          <small className="roll-timeout">
+            {locale === 'zh-CN' ? `读秒延迟 ${resolvedMs ? `${resolvedMs}s` : '—'}` : `Read delay ${resolvedMs ? `${resolvedMs}s` : '—'}`}
+          </small>
           <p>{localize(success ? check.successText : check.failureText, locale)}</p>
           <button className="primary-button" onClick={onFinish}>{copy.continue}</button>
         </div>

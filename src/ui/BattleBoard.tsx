@@ -3,6 +3,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
 import battleCoreUrl from '../assets/battle-core.png';
 import battleOuterUrl from '../assets/battle-outer.png';
 import enemySpritesUrl from '../assets/sprites/enemies.png';
+import bossWardenUrl from '../assets/boss-warden.png';
 import miraSpriteUrl from '../assets/sprites/mira.png';
 import orinSpriteUrl from '../assets/sprites/orin.png';
 import sableSpriteUrl from '../assets/sprites/sable.png';
@@ -104,6 +105,7 @@ export const BattleBoard = forwardRef<BattleBoardHandle, BattleBoardProps>(funct
         this.load.image('mira-sprite', miraSpriteUrl);
         this.load.image('sable-sprite', sableSpriteUrl);
         this.load.image('orin-sprite', orinSpriteUrl);
+        this.load.image('warden-sprite', bossWardenUrl);
         this.load.image('enemy-sprites', enemySpritesUrl);
       }
 
@@ -603,6 +605,8 @@ export const BattleBoard = forwardRef<BattleBoardHandle, BattleBoardProps>(funct
           image = this.add.image(0, 21, 'sable-sprite').setOrigin(0.5, 1).setScale(0.064);
         } else if (unit.templateId === 'orin-evoker') {
           image = this.add.image(0, 21, 'orin-sprite').setOrigin(0.5, 1).setScale(0.052);
+        } else if (unit.templateId === 'ash-warden') {
+          image = this.add.image(0, 24, 'warden-sprite').setOrigin(0.5, 1).setScale(0.083).setTint(0xe88f5b);
         } else if (unit.templateId === 'ash-thrall') {
           image = this.add.image(1, 21, 'enemy-sprites', 'ash-thrall').setOrigin(0.5, 1).setScale(0.078);
         } else if (unit.templateId === 'cinder-archer') {
