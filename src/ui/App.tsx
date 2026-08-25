@@ -107,12 +107,16 @@ export function App() {
       mood: storyMood(currentNode.id, sentence),
       cues: withFreshCues(sentence),
     }));
-    return [
+    const segments: NarrationSegment[] = [
       ...(currentNode.id === contract.startNodeId ? [{ text: 'Contract-bearer. Your company has been summoned.', mood: 'address' as const }] : []),
       { text: currentNode.title['en-US'], mood: 'title' as const },
       ...body,
       ...(currentNode.quote ? [{ text: currentNode.quote['en-US'], mood: 'ominous' as const, pauseAfter: 520, cues: withFreshCues(currentNode.quote['en-US']) }] : []),
     ];
+    return segments.map((segment, index) => ({
+      ...segment,
+      audioUrl: `/voice/en/${currentNode.id}-${String(index).padStart(2, '0')}.wav`,
+    }));
   }, [currentNode]);
 
   useEffect(() => {
@@ -138,8 +142,7 @@ export function App() {
     setNarrating(false);
     if (!inRun || !narrationScript.length || !profile.narrationEnabled || !profile.soundEnabled) return;
     const timer = window.setTimeout(() => {
-      setNarrating(true);
-      const started = emberNarrator.speak(narrationScript, () => setNarrating(false));
+      const started = emberNarrator.speak(narrationScript, () => setNarrating(false), () => setNarrating(true));
       if (!started) setNarrating(false);
     }, 420);
     return () => {
@@ -435,7 +438,7 @@ export function App() {
                   <button className="settings-row" onClick={() => {
                     const updated = { ...profile, narrationEnabled: !profile.narrationEnabled };
                     saveProfile(updated); setProfile(updated);
-                  }}><span>{locale === 'zh-CN' ? '英文DM旁白' : 'English DM narration'}</span><b>{profile.narrationEnabled ? 'ON' : 'OFF'}</b></button>
+                  }}><span>{locale === 'zh-CN' ? '英文DM音轨' : 'English DM tracks'}</span><b>{profile.narrationEnabled ? 'ON' : 'OFF'}</b></button>
                   <div className="audio-mixer">
                     <label><span>{locale === 'zh-CN' ? '背景音乐' : 'Music'}</span><input aria-label={locale === 'zh-CN' ? '背景音乐音量' : 'Music volume'} type="range" min="0" max="100" value={Math.round(profile.musicVolume * 100)} onChange={(event) => {
                       const updated = { ...profile, musicVolume: Number(event.target.value) / 100 };
@@ -544,8 +547,8 @@ export function App() {
           <div className="result-stats"><span><b>+{runRenown}</b>{copy.renown}</span><span><b>{difficulty === 'veteran' ? 'V' : 'E'}</b>{difficulty === 'veteran' ? copy.veteran : copy.explorer}</span><span><b>{profile.endings.length}</b>{copy.endings}</span></div>
           <div className="ending-actions">
             {profile.narrationEnabled && <button className="secondary-button" onClick={() => {
-              setNarrating(true);
-              if (!emberNarrator.speak(narrationScript, () => setNarrating(false))) setNarrating(false);
+              setNarrating(false);
+              if (!emberNarrator.speak(narrationScript, () => setNarrating(false), () => setNarrating(true))) setNarrating(false);
             }}>{narrating ? (locale === 'zh-CN' ? 'DM 讲述中…' : 'DM speaking…') : (locale === 'zh-CN' ? '重听结局' : 'Replay ending')}</button>}
             <button className={`interest-button ${interestRecorded ? 'recorded' : ''}`} onClick={() => {
               setInterestRecorded(true);
@@ -564,11 +567,11 @@ export function App() {
           <section className="story-panel">
             <div className={`dm-narration ${narrating ? 'speaking' : ''}`}>
               <span className="dm-seal">DM</span>
-              <div><small>THE ASHEN CHRONICLER · ENGLISH VO</small><strong>{narrating ? (locale === 'zh-CN' ? '英文旁白播放中 · 中文字幕' : 'English performance playing') : (locale === 'zh-CN' ? '英文配音 · 中文字幕' : 'English voice performance')}</strong></div>
+              <div><small>THE ASHEN CHRONICLER · ENGLISH TTS TRACK</small><strong>{narrating ? (locale === 'zh-CN' ? '英文音轨播放中 · 中文字幕' : 'English narration track playing') : (locale === 'zh-CN' ? '英文TTS音轨 · 中文字幕' : 'English TTS narration')}</strong></div>
               <span className="voice-wave" aria-hidden="true"><i /><i /><i /><i /></span>
               <button onClick={() => {
-                setNarrating(true);
-                if (!emberNarrator.speak(narrationScript, () => setNarrating(false))) setNarrating(false);
+                setNarrating(false);
+                if (!emberNarrator.speak(narrationScript, () => setNarrating(false), () => setNarrating(true))) setNarrating(false);
               }} aria-label={locale === 'zh-CN' ? '重播旁白' : 'Replay narration'}>↻</button>
             </div>
             <span className="eyebrow">{localize(currentNode.eyebrow, locale)}</span>
